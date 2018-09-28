@@ -1,144 +1,150 @@
 #include <EEPROM.h>
 
-constexpr unsigned SIZE_BYTES = 8192;
+constexpr unsigned SIZE_BYTES = 4096;
 
 char buffer[80];
-  
+
+constexpr uint8_t CE = 0x40;
+constexpr uint8_t WE = 0x20;
+constexpr uint8_t OE = 0x10;
+
+inline void enableChip(boolean value)
+{
+  if (value)
+    PORTB &= ~CE;
+  else
+    PORTB |= CE;
+}
+
 inline void enableOutput(boolean value)
 {
   if (value)
-    PORTB &= ~0x10;
+    PORTB &= ~OE;
   else
-    PORTB |= 0x10;
+    PORTB |= OE;
 }
 
 inline void enableWrite(boolean value)
 {
   if (value)
-    PORTB &= ~0x20;
+    PORTB &= ~WE;
   else
-    PORTB |= 0x20;
+    PORTB |= WE;
 }
 
-inline void setIOMode(char mode)
+inline void setIOMode(char mode, bool changeOE = true)
 {
   if (mode == OUTPUT)
   {
-    enableOutput(false);
+    if (changeOE)
+      enableOutput(false);
     DDRA = 0xFF;
   }
   else
   {
     DDRA = 0;
     PORTA = 0;    // disable pullups
-    enableOutput(true);
+    if (changeOE)
+      enableOutput(true);
   }
 }
 
-inline void setAddress(unsigned address)
+inline void setAddress(uint32_t address)
 {
-  unsigned char addressLow = address;
-  unsigned char addressHigh = address >> 8;
-  unsigned char addressHighFixed = (addressHigh & 0x0F) | ((addressHigh & 0x10) << 3);
+  auto addressBytes = reinterpret_cast<const uint8_t*>(&address);
   
-  PORTC = addressLow;
-  PORTB = (PORTB & 0x70) | addressHighFixed;
+  PORTC = addressBytes[0];
+  PORTB = (PORTB & 0xF0) | (addressBytes[1] & 0x0F);
+  PORTF = ((addressBytes[2] & 0x01) << 4) | (addressBytes[1] >> 4);
 }
 
-void writeByte(char value)
+inline void writeByte(uint8_t value)
 {
   PORTA = value;
   enableWrite(true);
   enableWrite(false);
 }
 
-inline unsigned char readByte()
+inline void writeByteAt(uint32_t address, uint8_t ch)
+{
+  setIOMode(OUTPUT);
+  setAddress(address);
+  writeByte(ch);
+  setIOMode(INPUT);
+}
+
+inline uint8_t readByte()
 {
   return PINA;
 }
 
-bool waitWriteCycle(uint8_t prevWrittenByte)
+bool verifyWrite(uint8_t expectedData)
 {
   setIOMode(INPUT);
-
-  bool writeSuccess = false;
-
-  for (uint16_t i = 0; i < 1000; ++i)
-  {
-    if (readByte() == prevWrittenByte)
-    {
-      writeSuccess = true;
-      break;
-    }
-
-    enableOutput(false);
-    delayMicroseconds(999);
-    enableOutput(true);
-    delayMicroseconds(1);
-  }
-
-   setIOMode(OUTPUT);
-   return writeSuccess;
-   
-//  constexpr byte BIT6_MASK = 0b01000000;
-//  bool writeSuccess = false;
-//
-//  auto prevState = readByte() & BIT6_MASK;
-//  for (uint8_t i = 0; i < 1000; ++i)
-//  {
-//    enableOutput(false);
-//    
-//    delayMicroseconds(100);
-//    enableOutput(true);
-//    delayMicroseconds(1);
-//
-//    auto newState = readByte() & BIT6_MASK;
-//    if (prevState == newState)
-//    {
-//      writeSuccess = true;
-//      break;
-//    }
-//      
-//    prevState = newState;
-//  }
-//
-//  return writeSuccess;
-}
-
-bool writeEEPROM(uint16_t address, const uint8_t* data, uint16_t length)
-{
-  setIOMode(OUTPUT);
   
-  auto remaining = length;
-  
-  while (remaining > 0)
+  while (true)
   {
-    uint8_t blockSize = remaining > 64 ? 64 : remaining;
-    remaining -= blockSize;
-
-    //snprintf(buffer, sizeof(buffer), "Writing %u bytes to %04x (%u remaining)\n", blockSize, address, remaining);
-    //Serial.write(buffer);
-    //Serial.flush();
-
-    while (blockSize--)
-    {
-      setAddress(address++);
-      writeByte(*data++);
-    }
-
-    auto prevByte = *(data - 1);
+    delayMicroseconds(10);
     
-    if (!waitWriteCycle(prevByte))
+    if (readByte() == expectedData)
     {
-      setIOMode(INPUT);
-      snprintf(buffer, sizeof(buffer), "Failed to verify byte %02x at address %04x: read %02x\n", (unsigned)prevByte, address - 1, (unsigned)readByte());
-      Serial.write(buffer);
-      Serial.flush();
+      // Need to verify correct read is stable
+      auto test0 = readByte();
+      auto test1 = readByte();
+      if (test0 == expectedData && test1 == expectedData)
+        break;
+
       return false;
     }
   }
 
+  return true;
+}
+
+bool writeEEPROM(uint32_t address, const uint8_t* data, uint16_t length)
+{
+  enableChip(true);
+  setIOMode(OUTPUT);
+  
+  for (const uint8_t* ch = data; ch != data + length; ++ch, ++address)
+  {
+    //snprintf(buffer, sizeof(buffer), "Writing %u bytes to %04x (%u remaining)\n", blockSize, address, remaining);
+    //Serial.write(buffer);
+    //Serial.flush();
+
+    // Software Data Protection unlock sequence
+    writeByteAt(0x5555, 0xAA);
+    writeByteAt(0x2AAA, 0x55);
+    writeByteAt(0x5555, 0xA0);
+
+    writeByteAt(address, *ch);
+    if (!verifyWrite(*ch))
+    {
+      snprintf(buffer, sizeof(buffer), "Failed to write byte %02x at address %05lx\n", (unsigned)*ch, address);
+      Serial.write(buffer);
+      Serial.flush();
+    }
+    
+    setIOMode(OUTPUT);
+
+//    if (readByte() != *ch)
+//    {
+//      auto test0 = readByte();
+//      auto test1 = readByte();
+//      setIOMode(INPUT);
+//      
+//      if (test0 != *ch || test1 != *ch)
+//      {
+//        snprintf(buffer, sizeof(buffer), "Failed to write byte %02x at address %05lx: read %02x\n", (unsigned)*ch, address, (unsigned)test1);
+//        Serial.write(buffer);
+//        Serial.flush();
+//        return false;
+//      }
+//    }
+  }
+
   setIOMode(INPUT);
+  enableChip(false);
   return true;
 }
 
@@ -162,6 +168,7 @@ void dumpEEPROM()
   constexpr unsigned BYTES_PER_ROW = 16;
 
   setIOMode(INPUT);
+  enableChip(true);
 
   uint8_t prevRow[BYTES_PER_ROW];
   bool sameFlag = false;
@@ -201,16 +208,18 @@ void dumpEEPROM()
   snprintf(buffer, sizeof(buffer), "%04x end\n", SIZE_BYTES);
   Serial.write(buffer);
   Serial.flush();  
+
+  enableChip(false);
 }
 
 bool updateEEPROM()
 {
-  Serial.write("Clearing EEPROM\n");
-
-  if (!clearEEPROM())
-    return false;
-
-  dumpEEPROM();
+//  Serial.write("Clearing EEPROM\n");
+//
+//  if (!clearEEPROM())
+//    return false;
+//
+//  dumpEEPROM();
   
 //  unsigned char offsetValue = EEPROM.read(0);
 //  EEPROM.write(0, offsetValue + 1);
@@ -417,24 +426,77 @@ void runEEPROM()
   }
 }
 
-void unprotectedEEPROM()
+void readID()
 {
   setIOMode(OUTPUT);
-  
-  setAddress(0x1555 << 6);
-  writeByte(0xAA);
-  setAddress(0x0AAA << 6);
-  writeByte(0x55);
-  setAddress(0x1555 << 6);
-  writeByte(0x80);
-  writeByte(0xAA);
-  setAddress(0x0AAA << 6);
-  writeByte(0x55);
-  setAddress(0x1555 << 6);
-  writeByte(0x20);
+  enableChip(true);
 
-  delayMicroseconds(1);
+  writeByteAt(0x5555, 0xAA);
+  writeByteAt(0x2AAA, 0x55);
+  writeByteAt(0x5555, 0x90);
+  
+//  setAddress(0x5555);
+//  writeByte(0xAA);
+//  setAddress(0x2AAA);
+//  writeByte(0x55);
+//  setAddress(0x5555);
+//  writeByte(0x90);
+
+  enableChip(false);
+  _NOP();
+  _NOP();
+  _NOP();
   setIOMode(INPUT);
+  enableChip(true);
+  
+  uint8_t idBytes[2];
+  setAddress(0x0000);
+  idBytes[0] = readByte();
+  setAddress(0x0001);
+  idBytes[1] = readByte();
+
+  setIOMode(OUTPUT);
+  setAddress(0x5555);
+  writeByte(0xAA);
+  setAddress(0x2AAA);
+  writeByte(0x55);
+  setAddress(0x5555);
+  writeByte(0xF0);
+  enableChip(false);
+  delayMicroseconds(20);
+
+  snprintf(buffer, sizeof(buffer), "ID bytes: %02x %02x\n", (unsigned)idBytes[0], (unsigned)idBytes[1]);
+  Serial.write(buffer);
+}
+
+void eraseSector(uint8_t sector)
+{
+  snprintf(buffer, sizeof(buffer), "Erasing sector %04x\n", sector);
+  Serial.write(buffer);
+  
+  auto address = static_cast<uint32_t>(sector) << 12;
+  auto start = millis();
+
+  setIOMode(OUTPUT);
+  enableChip(true);
+  writeByteAt(0x5555, 0xAA);
+  writeByteAt(0x2AAA, 0x55);
+  writeByteAt(0x5555, 0x80);
+  writeByteAt(0x5555, 0xAA);
+  writeByteAt(0x2AAA, 0x55);
+  writeByteAt(address, 0x30);
+
+  if (!verifyWrite(0xFF))
+  {
+    snprintf(buffer, sizeof(buffer), "Failed to erase sector %04x\n", address);
+    Serial.write(buffer);
+    Serial.flush();
+    return;
+  }
+
+  auto end = millis();
+  snprintf(buffer, sizeof(buffer), "Sector erase finished (%lu ms)\n", end - start);
+  Serial.write(buffer);
 }
 
 void setup() 
@@ -444,28 +506,29 @@ void setup()
   PORTA = 0;
   PORTB = 0;
   PORTC = 0;
+  PORTF = 0;
   
+  enableChip(false);
   setIOMode(INPUT);
   enableWrite(false);
   setAddress(0);
 
-  PORTB = 0b00110000;
-  PORTC = 0;
-  DDRB = 0x3f;
+  DDRB = 0xff;
   DDRC = 0xff;
+  DDRF = 0xff;
 
-  Serial.begin(115200);
+  Serial.begin(230400);
 
   while (!Serial)
     ;
 
   setIOMode(INPUT);
 
-  unprotectedEEPROM();
+  eraseSector(0);
   updateEEPROM();
-  
   // writePong();
-  runEEPROM();
+  // runEEPROM();
+  // readID();
 }
 
 void loop() {

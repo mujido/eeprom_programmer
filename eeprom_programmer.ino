@@ -88,6 +88,12 @@ inline uint8_t readByte()
   return value;
 }
 
+inline uint8_t readByteAt(uint32_t address)
+{
+  setAddress(address);
+  return readByte();
+}
+
 bool waitWriteComplete()
 {
   setIOMode(INPUT);
@@ -133,21 +139,6 @@ bool writeEEPROM(uint32_t address, const uint8_t* data, uint16_t length)
     }
     
     setIOMode(OUTPUT);
-
-//    if (readByte() != *ch)
-//    {
-//      auto test0 = readByte();
-//      auto test1 = readByte();
-//      setIOMode(INPUT);
-//      
-//      if (test0 != *ch || test1 != *ch)
-//      {
-//        snprintf(buffer, sizeof(buffer), "Failed to write byte %02x at address %05lx: read %02x\n", (unsigned)*ch, address, (unsigned)test1);
-//        Serial.write(buffer);
-//        Serial.flush();
-//        return false;
-//      }
-//    }
   }
 
   setIOMode(INPUT);
@@ -155,7 +146,16 @@ bool writeEEPROM(uint32_t address, const uint8_t* data, uint16_t length)
   return true;
 }
 
-static uint8_t eepromBuf[256];
+void readEEPROM(uint32_t address, uint8_t* buffer, uint16_t size)
+{
+  setIOMode(INPUT);
+  enableChip(true);
+
+  while(size--)
+    *buffer++ = readByteAt(address++);
+
+  enableChip(false);
+}
 
 void dumpEEPROM()
 {
@@ -207,19 +207,10 @@ void dumpEEPROM()
   enableChip(false);
 }
 
-bool updateEEPROM()
+bool updateEEPROM(uint8_t offsetValue = 0)
 {
-//  Serial.write("Clearing EEPROM\n");
-//
-//  if (!clearEEPROM())
-//    return false;
-//
-//  dumpEEPROM();
+  uint8_t eepromBuf[256];
   
-//  unsigned char offsetValue = EEPROM.read(0);
-//  EEPROM.write(0, offsetValue + 1);
-  uint8_t offsetValue = 0;
-
   snprintf(buffer, sizeof(buffer), "Preparing buffer (%p)\n", eepromBuf);
   Serial.write(buffer);
 
@@ -258,27 +249,22 @@ bool updateEEPROM()
 
   startTime = millis();
 
-  dumpEEPROM();
+  for (uint32_t address = 0; address < SIZE_BYTES; address += 256)
+  {
+    uint8_t tmp[256];
+    readEEPROM(address, tmp, sizeof(tmp));
 
-//  for (unsigned i = 0; i < SIZE_BYTES / BYTES_PER_ROW; ++i)
-//  {
-//    unsigned baseAddress = BYTES_PER_ROW * i;
-//    
-//    unsigned bufferLength = 0;
-//    bufferLength += snprintf(buffer, sizeof(buffer), "%04x:", baseAddress);
-//
-//    for (char j = 0; j < BYTES_PER_ROW; ++j)
-//    {
-//      setAddress(baseAddress + j);
-//      unsigned data = readByte();
-//      auto fmtSize = snprintf(buffer + bufferLength, sizeof(buffer) - bufferLength, " %02x", data & 0x00FF);
-//      bufferLength += fmtSize;
-//    }
-//
-//    Serial.write(buffer, bufferLength);
-//    Serial.write("\n");
-//    Serial.flush();
-//  }
+    for (uint16_t i = 0; i < sizeof(tmp); ++i)
+    {
+      if (eepromBuf[i] != tmp[i])
+      {
+        snprintf(buffer, sizeof(buffer), "Verification failed at %05lx: expected %02x actual %02x\n", address + i, eepromBuf[i], tmp[i]);
+        Serial.write(buffer);
+        Serial.flush();
+        return false;
+      }
+    }
+  }
 
   duration = millis() - startTime;
 
@@ -409,6 +395,7 @@ bool updateEEPROM()
 void runEEPROM()
 {
   setIOMode(INPUT);
+  enableChip(true);
 
   setAddress(0);
   delay(1500);
@@ -418,8 +405,10 @@ void runEEPROM()
     //snprintf(buffer, sizeof(buffer), "Address 0x%04x\n", i);
     //Serial.write(buffer);
     setAddress(i);
-    delay(100);
+    delay(50);
   }
+
+  enableChip(false);
 }
 
 void readID()
@@ -550,7 +539,7 @@ void setup()
   eraseChip();
   updateEEPROM();
   // writePong();
-  // runEEPROM();
+  runEEPROM();
   // readID();
 }
 

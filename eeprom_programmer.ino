@@ -79,30 +79,6 @@ bool waitWriteCycle(uint8_t prevWrittenByte)
 
    setIOMode(OUTPUT);
    return writeSuccess;
-   
-//  constexpr byte BIT6_MASK = 0b01000000;
-//  bool writeSuccess = false;
-//
-//  auto prevState = readByte() & BIT6_MASK;
-//  for (uint8_t i = 0; i < 1000; ++i)
-//  {
-//    enableOutput(false);
-//    
-//    delayMicroseconds(100);
-//    enableOutput(true);
-//    delayMicroseconds(1);
-//
-//    auto newState = readByte() & BIT6_MASK;
-//    if (prevState == newState)
-//    {
-//      writeSuccess = true;
-//      break;
-//    }
-//      
-//    prevState = newState;
-//  }
-//
-//  return writeSuccess;
 }
 
 bool writeEEPROM(uint16_t address, const uint8_t* data, uint16_t length)
@@ -283,124 +259,6 @@ bool updateEEPROM()
   return true;
 }
 
-//__attribute__((noinline)) bool writePong()
-//{
-//  static constexpr unsigned char pongStates[] = {
-//    0b00000000,
-//    0b00000001,
-//    0b00000011,
-//    0b00000101,
-//    0b00001001,
-//    0b00010001,
-//    0b00100001,
-//    0b01000001,
-//    0b10000001,
-//    0b11000001,
-//    0b10100001,
-//    0b10010001,
-//    0b10001001,
-//    0b10000101,
-//    0b10000011,
-//    0b10000111,
-//    0b10001011,
-//    0b10010011,
-//    0b10100011,
-//    0b11000011,
-//    0b11100011,
-//    0b11010011,
-//    0b11001011,
-//    0b11000111,
-//    0b11001111,
-//    0b11010111,
-//    0b11100111,
-//    0b11110111,
-//    0b11101111,
-//    0b11111111,
-//  };
-//  
-//  Serial.write("Beginning to write data\n");
-//  unsigned long startTime = millis();
-//
-//  static_assert(sizeof(eepromBuf) >= 256, "buffer too small");
-//
-//  unsigned i = 0;
-//  while (i < SIZE_BYTES)
-//  {
-//    unsigned copied = 0;
-//    while (copied < sizeof(eepromBuf))
-//    {
-//      memcpy(eepromBuf + copied, pongStates, sizeof(pongStates));
-//      copied += 
-//
-//      
-//  }
-//  for (unsigned i = 0; i < SIZE_BYTES; ++i)
-//  {
-//    unsigned char state = i % (sizeof(pongStates) / sizeof(pongStates[0]));
-//    unsigned char newByte = pongStates[state];
-//
-//    setAddress(i);
-//    writeByte(newByte);
-//
-//    if ((i + 1) % 64 == 0)
-//    {
-//      unsigned percentComplete = 100UL * (i + 1) / SIZE_BYTES;
-//      if (percentComplete % 5 == 0)
-//      {
-//        snprintf(buffer, sizeof(buffer), "Written %u%%\n", percentComplete);
-//        Serial.write(buffer);
-//      }
-//
-//      if (!waitWriteCycle(newByte))
-//      {
-//        snprintf(buffer, sizeof(buffer), "Failed to verify byte %02x at address %04x: read %02x\n", (unsigned)newByte, i, (unsigned)readByte());
-//        Serial.write(buffer);
-//        return false;
-//      }
-//
-//      setIOMode(OUTPUT);
-//    }
-//  }
-//
-//  setIOMode(INPUT);
-//
-//  unsigned long duration = millis() - startTime;
-//
-//  snprintf(buffer, sizeof(buffer), "Write finished (%lu ms)\n", duration);
-//  Serial.write(buffer);
-//  Serial.write("Verifying contents\n");
-//
-//  constexpr unsigned BYTES_PER_ROW = 16;
-//
-//  startTime = millis();
-//
-//  for (unsigned i = 0; i < SIZE_BYTES / BYTES_PER_ROW; ++i)
-//  {
-//    unsigned baseAddress = BYTES_PER_ROW * i;
-//    
-//    unsigned bufferLength = 0;
-//    bufferLength += snprintf(buffer, sizeof(buffer), "%04x:", baseAddress);
-//
-//    for (char j = 0; j < BYTES_PER_ROW; ++j)
-//    {
-//      setAddress(baseAddress + j);
-//      unsigned data = readByte();
-//      auto fmtSize = snprintf(buffer + bufferLength, sizeof(buffer) - bufferLength, " %02x", data & 0x00FF);
-//      bufferLength += fmtSize;
-//    }
-//
-//    Serial.write(buffer, bufferLength);
-//    Serial.write("\n");
-//  }
-//
-//  duration = millis() - startTime;
-//
-//  snprintf(buffer, sizeof(buffer), "Verification complete (%lu ms)\n", duration);
-//  Serial.write(buffer);
-//
-//  return true;
-//}
-//
 void runEEPROM()
 {
   setIOMode(INPUT);
@@ -464,7 +322,6 @@ void setup()
   unprotectedEEPROM();
   updateEEPROM();
   
-  // writePong();
   runEEPROM();
 }
 
